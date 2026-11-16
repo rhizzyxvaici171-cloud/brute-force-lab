@@ -89,9 +89,10 @@ FLAG = "FLAG{brute_force_is_only_as_strong_as_the_weakest_password}"
 # Levels supported by the lab.
 LEVELS = ("low", "medium", "high", "impossible")
 
-# Lockout tuning for the "impossible" level.
-LOCKOUT_THRESHOLD = 5      # failed attempts before lock
-LOCKOUT_SECONDS = 30       # how long the account stays locked
+# Lockout tuning for the "impossible" level (overridable via env for testing
+# or to adjust classroom difficulty).
+LOCKOUT_THRESHOLD = int(os.environ.get("LOCKOUT_THRESHOLD", "5"))  # fails before lock
+LOCKOUT_SECONDS = int(os.environ.get("LOCKOUT_SECONDS", "30"))     # lock duration
 
 # ---------------------------------------------------------------------------
 # Lockout store for the "impossible" level.
@@ -108,59 +109,79 @@ LOCKOUT_DB = os.environ.get("LOCKOUT_DB", os.path.join(
 
 
 def _lock_db():
-    conn = sqlite3.connect(LOCKOUT_DB, timeout=5)
+    # isolation_level=None -> autocommit. Every statement is committed on its
+    # own, so there are no implicit transactions and no "BEGIN within a
+    # transaction" surprises (which behave differently across Python versions
+    # and silently broke the counter on the hosted multi-worker server). WAL
+    # mode lets concurrent worker processes read/write the shared file safely.
+    conn = sqlite3.connect(LOCKOUT_DB, timeout=10, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS lockouts "
-        "(username TEXT PRIMARY KEY, fails INTEGER, locked_until REAL)"
+        "(username TEXT PRIMARY KEY, fails INTEGER NOT NULL DEFAULT 0, "
+        "locked_until REAL NOT NULL DEFAULT 0)"
     )
     return conn
 
 
 def lockout_remaining(username):
     """Seconds left on an active lock for this user, else 0."""
-    with _lock_db() as conn:
+    conn = _lock_db()
+    try:
         row = conn.execute(
             "SELECT locked_until FROM lockouts WHERE username=?", (username,)
         ).fetchone()
+    finally:
+        conn.close()
     if row and row[0] > time.time():
         return int(row[0] - time.time()) + 1
     return 0
 
 
 def record_failure(username):
-    """Count a failed attempt. Returns True if the account is now locked."""
-    now = time.time()
-    with _lock_db() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
+    """Count a failed attempt. Returns True if the account is now locked.
+
+    The increment is a single atomic UPSERT, so concurrent workers cannot lose
+    a count to a read-modify-write race.
+    """
+    conn = _lock_db()
+    try:
+        # Atomically create the row (fails=1) or bump the existing counter.
+        conn.execute(
+            "INSERT INTO lockouts (username, fails, locked_until) "
+            "VALUES (?, 1, 0) "
+            "ON CONFLICT(username) DO UPDATE SET fails = fails + 1",
+            (username,),
+        )
+        fails = conn.execute(
             "SELECT fails FROM lockouts WHERE username=?", (username,)
-        ).fetchone()
-        fails = (row[0] if row else 0) + 1
+        ).fetchone()[0]
         if fails >= LOCKOUT_THRESHOLD:
             conn.execute(
-                "INSERT OR REPLACE INTO lockouts VALUES (?,?,?)",
-                (username, 0, now + LOCKOUT_SECONDS),
+                "UPDATE lockouts SET fails=0, locked_until=? WHERE username=?",
+                (time.time() + LOCKOUT_SECONDS, username),
             )
-            conn.commit()
             return True
-        conn.execute(
-            "INSERT OR REPLACE INTO lockouts VALUES (?,?,?)",
-            (username, fails, 0.0),
-        )
-        conn.commit()
         return False
+    finally:
+        conn.close()
 
 
 def clear_lockout(username):
-    with _lock_db() as conn:
+    conn = _lock_db()
+    try:
         conn.execute("DELETE FROM lockouts WHERE username=?", (username,))
-        conn.commit()
+    finally:
+        conn.close()
 
 
 def clear_all_lockouts():
-    with _lock_db() as conn:
+    conn = _lock_db()
+    try:
         conn.execute("DELETE FROM lockouts")
-        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
