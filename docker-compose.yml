@@ -1,0 +1,10 @@
+services:
+  brute-force-lab:
+    build: .
+    image: brute-force-lab:latest
+    ports:
+      - "5000:5000"
+    environment:
+      # Set a real secret when hosting beyond localhost.
+      - LAB_SECRET_KEY=change-me-in-class
+    restart: unless-stopped

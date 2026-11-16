@@ -1,0 +1,19 @@
+# Render blueprint for the Brute Force Lab.
+# In the Render dashboard: New + -> Blueprint -> pick your repo. Render reads
+# this file and creates the service. Set LAB_GATE_PASSWORD afterwards (see
+# README) so the lab is password-gated for your class.
+services:
+  - type: web
+    name: brute-force-lab
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4"
+    healthCheckPath: /healthz
+    envVars:
+      - key: LAB_SECRET_KEY
+        generateValue: true          # Render generates a random secret
+      - key: LAB_GATE_USER
+        value: student               # the class username (change if you like)
+      - key: LAB_GATE_PASSWORD
+        sync: false                  # you set this in the dashboard, kept secret

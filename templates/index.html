@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Brute Force Lab</h1>
+<p class="lead">
+    A hands-on target for practicing password brute-force attacks and the
+    defenses that stop them. Pick a difficulty, then attack the login form
+    with your tool of choice.
+</p>
+
+<div class="card">
+    <h2>Current difficulty: <span class="pill">{{ level }}</span></h2>
+    <p>Switch the level the login form uses:</p>
+    <div class="level-row">
+        {% for l in levels %}
+            <a class="btn {{ 'btn-active' if l == level else '' }}"
+               href="{{ url_for('set_level', level=l) }}">{{ l }}</a>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <h2>What each level does</h2>
+    <table class="levels">
+        <tr><th>Level</th><th>Defense</th><th>Lesson</th></tr>
+        <tr>
+            <td><b>low</b></td>
+            <td>None</td>
+            <td>Baseline — unlimited guesses, verbose errors.</td>
+        </tr>
+        <tr>
+            <td><b>medium</b></td>
+            <td>1.5s delay per attempt</td>
+            <td>Rate throttling slows but does not stop an attack.</td>
+        </tr>
+        <tr>
+            <td><b>high</b></td>
+            <td>Per-request anti-automation token</td>
+            <td>Tools must parse a fresh token from each response.</td>
+        </tr>
+        <tr>
+            <td><b>impossible</b></td>
+            <td>Account lockout after 5 fails</td>
+            <td>Lockout defeats naive online brute force.</td>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Getting started</h2>
+    <ol>
+        <li>Open the <a href="{{ url_for('login') }}">login target</a>.</li>
+        <li>Try a few passwords by hand to learn the form.</li>
+        <li>Point an automated tool at it (see the student guide).</li>
+        <li>Prove success by capturing the flag shown after login.</li>
+    </ol>
+    <p class="muted">
+        There are several valid accounts with weak passwords. One is
+        <code>admin</code>. The rest are for you to discover.
+    </p>
+</div>
+{% endblock %}

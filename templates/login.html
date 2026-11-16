@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Login target</h1>
+<p class="muted">Active difficulty: <span class="pill">{{ level }}</span>
+   — change it on the <a href="{{ url_for('index') }}">home page</a>.</p>
+
+{% if success %}
+    <div class="card success">
+        <h2>✅ Welcome, {{ success }}!</h2>
+        <p>You successfully authenticated. Capture this flag:</p>
+        <pre class="flag">{{ flag }}</pre>
+        <a class="btn" href="{{ url_for('logout') }}">Log out</a>
+    </div>
+{% else %}
+    {% if error %}
+        <div class="flash flash-error">{{ error }}</div>
+    {% endif %}
+
+    <div class="card">
+        <form method="POST" action="{{ url_for('login') }}" class="login-form">
+            <label>
+                Username
+                <input type="text" name="username" autocomplete="off" autofocus>
+            </label>
+            <label>
+                Password
+                <input type="password" name="password" autocomplete="off">
+            </label>
+            {% if token %}
+                <input type="hidden" name="user_token" value="{{ token }}">
+            {% endif %}
+            <button type="submit" class="btn btn-primary">Log in</button>
+        </form>
+    </div>
+
+    <p class="muted">
+        This form takes a standard POST with <code>username</code> and
+        <code>password</code>{% if token %}, plus a hidden
+        <code>user_token</code> that changes every request{% endif %}.
+    </p>
+{% endif %}
+{% endblock %}
