@@ -128,4 +128,6 @@ docker-compose.yml     One-command local container
 STUDENT_GUIDE.md       Hand this to students
 ```
 
-See **[STUDENT_GUIDE.md](STUDENT_GUIDE.md)** for the attack walkthrough.
+See **[STUDENT_GUIDE.md](STUDENT_GUIDE.md)** for the quick attack walkthrough,
+and **[LEVEL_MANUAL.md](LEVEL_MANUAL.md)** for a full level-by-level manual with
+copy-paste commands for every difficulty.
