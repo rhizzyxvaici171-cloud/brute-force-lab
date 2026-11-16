@@ -13,6 +13,8 @@ COPY . .
 
 EXPOSE 5000
 
-# 2 workers / 4 threads is plenty for a classroom. Students' brute-force
-# traffic hits a single process fine.
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4"]
+# One worker (with threads) so the 'impossible' level's in-memory lockout
+# counter is shared across all requests. Multiple workers would each keep a
+# separate copy and the lockout would not trigger. One worker is plenty for a
+# classroom.
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8"]

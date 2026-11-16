@@ -8,7 +8,11 @@ services:
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4"
+    # One worker (with threads) so the in-memory lockout counter used by the
+    # 'impossible' level is shared across all requests. Multiple workers each
+    # keep their own copy and the lockout would not work. One worker handles a
+    # classroom fine.
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8"
     healthCheckPath: /healthz
     envVars:
       - key: LAB_SECRET_KEY
