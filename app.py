@@ -20,7 +20,7 @@ Author: built for a cybersecurity instructor's live student lab.
 import os
 import time
 import secrets
-from collections import defaultdict
+import sqlite3
 
 from flask import (
     Flask,
@@ -89,13 +89,78 @@ FLAG = "FLAG{brute_force_is_only_as_strong_as_the_weakest_password}"
 # Levels supported by the lab.
 LEVELS = ("low", "medium", "high", "impossible")
 
-# In-memory counters for the "impossible" lockout level.
-# Maps username -> {"fails": int, "locked_until": float}
-_lockout_state = defaultdict(lambda: {"fails": 0, "locked_until": 0.0})
-
 # Lockout tuning for the "impossible" level.
 LOCKOUT_THRESHOLD = 5      # failed attempts before lock
 LOCKOUT_SECONDS = 30       # how long the account stays locked
+
+# ---------------------------------------------------------------------------
+# Lockout store for the "impossible" level.
+#
+# This is kept in a tiny SQLite file rather than a Python dict on purpose: a
+# production server runs several worker processes, and an in-memory dict would
+# give each worker its own private counter, so the lockout would never trigger
+# reliably. A SQLite file on the instance is shared by all workers, so the
+# count is correct no matter how many workers run.
+# ---------------------------------------------------------------------------
+LOCKOUT_DB = os.environ.get("LOCKOUT_DB", os.path.join(
+    os.environ.get("TMPDIR", "/tmp"), "bruteforce_lockouts.db"
+))
+
+
+def _lock_db():
+    conn = sqlite3.connect(LOCKOUT_DB, timeout=5)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS lockouts "
+        "(username TEXT PRIMARY KEY, fails INTEGER, locked_until REAL)"
+    )
+    return conn
+
+
+def lockout_remaining(username):
+    """Seconds left on an active lock for this user, else 0."""
+    with _lock_db() as conn:
+        row = conn.execute(
+            "SELECT locked_until FROM lockouts WHERE username=?", (username,)
+        ).fetchone()
+    if row and row[0] > time.time():
+        return int(row[0] - time.time()) + 1
+    return 0
+
+
+def record_failure(username):
+    """Count a failed attempt. Returns True if the account is now locked."""
+    now = time.time()
+    with _lock_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT fails FROM lockouts WHERE username=?", (username,)
+        ).fetchone()
+        fails = (row[0] if row else 0) + 1
+        if fails >= LOCKOUT_THRESHOLD:
+            conn.execute(
+                "INSERT OR REPLACE INTO lockouts VALUES (?,?,?)",
+                (username, 0, now + LOCKOUT_SECONDS),
+            )
+            conn.commit()
+            return True
+        conn.execute(
+            "INSERT OR REPLACE INTO lockouts VALUES (?,?,?)",
+            (username, fails, 0.0),
+        )
+        conn.commit()
+        return False
+
+
+def clear_lockout(username):
+    with _lock_db() as conn:
+        conn.execute("DELETE FROM lockouts WHERE username=?", (username,))
+        conn.commit()
+
+
+def clear_all_lockouts():
+    with _lock_db() as conn:
+        conn.execute("DELETE FROM lockouts")
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -186,10 +251,8 @@ def login():
             time.sleep(0.5)
 
         if level == "impossible":
-            state = _lockout_state[username]
-            now = time.time()
-            if now < state["locked_until"]:
-                remaining = int(state["locked_until"] - now) + 1
+            remaining = lockout_remaining(username)
+            if remaining:
                 error = (
                     f"Account '{username}' is locked. "
                     f"Try again in {remaining}s."
@@ -206,7 +269,7 @@ def login():
 
         if check_credentials(username, password):
             if level == "impossible":
-                _lockout_state[username] = {"fails": 0, "locked_until": 0.0}
+                clear_lockout(username)
             success = username
             session["logged_in_as"] = username
         else:
@@ -217,16 +280,11 @@ def login():
             else:
                 error = "Username and/or password incorrect."
 
-            if level == "impossible":
-                state = _lockout_state[username]
-                state["fails"] += 1
-                if state["fails"] >= LOCKOUT_THRESHOLD:
-                    state["locked_until"] = time.time() + LOCKOUT_SECONDS
-                    state["fails"] = 0
-                    error = (
-                        f"Too many failed attempts. '{username}' locked "
-                        f"for {LOCKOUT_SECONDS}s."
-                    )
+            if level == "impossible" and record_failure(username):
+                error = (
+                    f"Too many failed attempts. '{username}' locked "
+                    f"for {LOCKOUT_SECONDS}s."
+                )
 
     return render_template(
         "login.html",
@@ -249,7 +307,7 @@ def logout():
 @app.route("/reset-lockouts")
 def reset_lockouts():
     """Instructor convenience: clear all lockout state."""
-    _lockout_state.clear()
+    clear_all_lockouts()
     flash("All lockout counters cleared.", "info")
     return redirect(url_for("login"))
 
