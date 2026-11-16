@@ -187,6 +187,20 @@ def clear_all_lockouts():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _git_commit():
+    """Best-effort local commit SHA by reading .git (no subprocess). Returns
+    None when unavailable. On Render, RENDER_GIT_COMMIT is used instead."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        head = open(os.path.join(here, ".git", "HEAD")).read().strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1].strip()
+            return open(os.path.join(here, ".git", ref)).read().strip()
+        return head  # detached HEAD already holds the SHA
+    except OSError:
+        return None
+
+
 def current_level():
     """Return the active difficulty level, defaulting to 'low'."""
     level = session.get("level", "low")
@@ -335,7 +349,11 @@ def reset_lockouts():
 
 @app.route("/healthz")
 def healthz():
-    return {"status": "ok"}, 200
+    # Report the running commit so the live deploy is observable at a glance.
+    # Render auto-populates RENDER_GIT_COMMIT with the deployed SHA; fall back
+    # to a local git read, then to "unknown".
+    commit = os.environ.get("RENDER_GIT_COMMIT") or _git_commit() or "unknown"
+    return {"status": "ok", "commit": commit[:12]}, 200
 
 
 if __name__ == "__main__":
